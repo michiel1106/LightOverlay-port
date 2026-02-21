@@ -4,7 +4,6 @@ import com.mojang.blaze3d.pipeline.*;
 import com.mojang.blaze3d.platform.*;
 import com.mojang.blaze3d.vertex.*;
 import it.unimi.dsi.fastutil.longs.Long2ByteMap;
-import net.minecraft.Util;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -13,11 +12,13 @@ import net.minecraft.client.renderer.*;
 import static net.minecraft.client.renderer.RenderPipelines.LINES_SNIPPET;
 import static net.minecraft.client.renderer.RenderPipelines.MATRICES_PROJECTION_SNIPPET;
 import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.client.renderer.rendertype.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
+import net.minecraft.gizmos.*;
+import net.minecraft.util.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Matrix4f;
@@ -36,15 +37,14 @@ public class LightOverlayRenderer implements Consumer<PoseStack> {
             .withCull(false)
             .withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.DEBUG_LINES)
             .build();
-    private static final Function<Double, RenderType.CompositeRenderType> LINE = Util.memoize(
+    private static final Function<Object, RenderType> LINE = Util.memoize(
             double_ -> RenderType.create("light_overlay_lines",
-                    256,
-                    LINE_PIPELINE,
-                    RenderType.CompositeState.builder()
-                            .setLineState(new RenderStateShard.LineStateShard(OptionalDouble.of(double_)))
-                            .createCompositeState(false)
+                    RenderSetup.builder(LINE_PIPELINE).createRenderSetup()
             )
     );
+
+
+
     
 
     public Frustum frustum;
@@ -68,15 +68,15 @@ public class LightOverlayRenderer implements Consumer<PoseStack> {
             int chunkRange = LightOverlay.getChunkRange();
             
             if (LightOverlay.showNumber) {
-                renderLevels(poses, camera, playerPos, playerPosX, playerPosY, playerPosZ, chunkRange, collisionContext);
+                renderLevels(playerPos, playerPosX, playerPosY, playerPosZ, chunkRange);
             } else {
-                renderCrosses(poses, camera, playerPos, playerPosX, playerPosY, playerPosZ, chunkRange, collisionContext);
+                renderCrosses(playerPos, playerPosX, playerPosY, playerPosZ, chunkRange, collisionContext);
             }
             minecraft.renderBuffers().bufferSource().endLastBatch();
         }
     }
     
-    private void renderLevels(PoseStack poses, Camera camera, BlockPos playerPos, int playerPosX, int playerPosY, int playerPosZ, int chunkRange, CollisionContext collisionContext) {
+    private void renderLevels(BlockPos playerPos, int playerPosX, int playerPosY, int playerPosZ, int chunkRange) {
         Minecraft minecraft = Minecraft.getInstance();
         BlockPos.MutableBlockPos mutable = new BlockPos.MutableBlockPos();
         BlockPos.MutableBlockPos downMutable = new BlockPos.MutableBlockPos();
@@ -91,36 +91,20 @@ public class LightOverlayRenderer implements Consumer<PoseStack> {
                 if (mutable.closerThan(playerPos, LightOverlay.reach)) {
                     if (isFrustumVisible(mutable.getX(), mutable.getY(), mutable.getZ(), mutable.getX() + 1, mutable.getX() + 1, mutable.getX() + 1)) {
                         downMutable.set(mutable.getX(), mutable.getY() - 1, mutable.getZ());
-                        renderLevel(poses, source, camera, minecraft.level, mutable, downMutable, objectEntry.getByteValue(), collisionContext);
+                        renderLevel(downMutable, objectEntry.getByteValue());
                     }
                 }
             }
         }
     }
-    
-    public void renderLevel(PoseStack poses, MultiBufferSource.BufferSource source, Camera camera, Level world, BlockPos pos, BlockPos down, byte level, CollisionContext collisionContext) {
-        Minecraft minecraft = Minecraft.getInstance();
+
+    public void renderLevel(BlockPos down, byte level) {
         String text = String.valueOf(level);
-        Font font = minecraft.font;
-        double cameraX = camera.getPosition().x;
-        double cameraY = camera.getPosition().y;
-        VoxelShape upperOutlineShape = world.getBlockState(down).getShape(world, down, collisionContext);
-        if (!upperOutlineShape.isEmpty())
-            cameraY += 1 - upperOutlineShape.max(Direction.Axis.Y);
-        double cameraZ = camera.getPosition().z;
-        poses.pushPose();
-        poses.translate(pos.getX() + 0.5 - cameraX, pos.getY() - cameraY + 0.005, pos.getZ() + 0.5 - cameraZ);
-        poses.mulPose(new Quaternionf().fromAxisAngleDeg(1, 0, 0, 90));
-//        poses.glNormal3f(0.0F, 1.0F, 0.0F);
-        float size = 0.07F;
-        poses.scale(-size, -size, size);
-        float float_3 = (float) (-font.width(text)) / 2.0F + 0.4f;
-        font.drawInBatch(text, float_3, -3.5f, level > LightOverlay.higherCrossLevel ? 0xff042404 : (LightOverlay.lowerCrossLevel >= 0 && level > LightOverlay.lowerCrossLevel ? 0xff0066ff : 0xff731111),
-                false, poses.last().pose(), source, Font.DisplayMode.SEE_THROUGH, 0, 15728880);
-        poses.popPose();
+        int color = level > LightOverlay.higherCrossLevel ? 0xff042404 : (LightOverlay.lowerCrossLevel >= 0 && level > LightOverlay.lowerCrossLevel ? 0xff0066ff : 0xff731111);
+        Gizmos.billboardText(text, Vec3.atLowerCornerWithOffset(down, 0.5, 1.3 + 1 * 0.2, 0.5), TextGizmo.Style.forColorAndCentered(color).withScale(1));
     }
     
-    private void renderCrosses(PoseStack poses, Camera camera, BlockPos playerPos, int playerPosX, int playerPosY, int playerPosZ, int chunkRange, CollisionContext collisionContext) {
+    private void renderCrosses(BlockPos playerPos, int playerPosX, int playerPosY, int playerPosZ, int chunkRange, CollisionContext collisionContext) {
         Minecraft minecraft = Minecraft.getInstance();
         MultiBufferSource.BufferSource source = minecraft.renderBuffers().bufferSource();
         VertexConsumer buffer = source.getBuffer(LINE.apply((double) LightOverlay.lineWidth));
@@ -142,33 +126,26 @@ public class LightOverlayRenderer implements Consumer<PoseStack> {
                             case LightOverlay.CROSS_YELLOW -> LightOverlay.yellowColor;
                             default -> LightOverlay.secondaryColor;
                         };
-                        renderCross(poses.last().pose(), buffer, camera, minecraft.level, mutable, color, collisionContext);
+                        renderCross(minecraft.level, mutable, color, collisionContext);
                     }
                 }
             }
         }
     }
-    
-    public void renderCross(Matrix4f pose, VertexConsumer builder, Camera camera, Level world, BlockPos pos, int color, CollisionContext collisionContext) {
-        float cameraX = (float) camera.getPosition().x;
-        float cameraY = (float) camera.getPosition().y - .005f;
+
+    public void renderCross(Level world, BlockPos pos, int color, CollisionContext collisionContext) {
         float blockOffset = 0;
         VoxelShape upperOutlineShape = world.getBlockState(pos).getShape(world, pos, collisionContext);
         if (!upperOutlineShape.isEmpty()) {
-            blockOffset += upperOutlineShape.max(Direction.Axis.Y);
+            blockOffset += (float) upperOutlineShape.max(Direction.Axis.Y);
         }
-        float cameraZ = (float) camera.getPosition().z;
-        
-        int red = (color >> 16) & 255;
-        int green = (color >> 8) & 255;
-        int blue = color & 255;
-        float x = pos.getX() - cameraX;
-        float y = pos.getY() - cameraY + blockOffset;
-        float z = pos.getZ() - cameraZ;
-        builder.addVertex(pose, x + .01f, y, z + .01f).setColor(red, green, blue, 255).setNormal(0.0f, 1.0f, 0.0f);
-        builder.addVertex(pose, x + .99f, y, z + .99f).setColor(red, green, blue, 255).setNormal(0.0f, 1.0f, 0.0f);
-        builder.addVertex(pose, x + .99f, y, z + .01f).setColor(red, green, blue, 255).setNormal(0.0f, 1.0f, 0.0f);
-        builder.addVertex(pose, x + .01f, y, z + .99f).setColor(red, green, blue, 255).setNormal(0.0f, 1.0f, 0.0f);
+        color |= 0xFF000000;
+
+        float x = pos.getX()/* - cameraX*/;
+        float y = pos.getY()/* - cameraY*/ + blockOffset;
+        float z = pos.getZ()/* - cameraZ*/;
+        Gizmos.line(new Vec3(x + .01f, y, z + .01f),new Vec3(x + .99f, y, z + .99f),color,LightOverlay.lineWidth);
+        Gizmos.line(new Vec3(x + .99f, y, z + .01f),new Vec3(x + .01f, y, z + .99f),color,LightOverlay.lineWidth);
     }
     
     public boolean isFrustumVisible(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
