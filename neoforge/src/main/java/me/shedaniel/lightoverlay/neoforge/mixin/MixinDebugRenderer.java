@@ -12,8 +12,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(DebugRenderer.class)
 public class MixinDebugRenderer {
-    @Inject(method = "render", at = @At("HEAD"))
-    private void render(PoseStack arg, Frustum arg2, MultiBufferSource.BufferSource arg3, double d, double e, double f, boolean bl, CallbackInfo ci) {
-        LightOverlayImpl.renderWorldLast(arg);
+    @Inject(method = "emitGizmos", at = @At("HEAD"))
+    private void render(Frustum arg, double d, double e, double f, float g, CallbackInfo ci) {
+        LightOverlayImpl.renderWorldLast(null);
     }
 }
